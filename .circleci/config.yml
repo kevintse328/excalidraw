@@ -16,7 +16,7 @@ jobs:
       - checkout
       - run:
           name: Install dependencies (no cache)
-          command: npm ci --prefer-offline=false --ignore-scripts
+          command: yarn install --frozen-lockfile --ignore-scripts
 
   benchmark-warm-cache:
     docker:
@@ -26,14 +26,14 @@ jobs:
       - checkout
       - restore_cache:
           keys:
-            - excalidraw-deps-v1-{{ checksum "package-lock.json" }}
+            - excalidraw-deps-v1-{{ checksum "yarn.lock" }}
       - run:
           name: Install dependencies
-          command: npm ci --ignore-scripts
+          command: yarn install --frozen-lockfile --ignore-scripts
       - save_cache:
-          key: excalidraw-deps-v1-{{ checksum "package-lock.json" }}
+          key: excalidraw-deps-v1-{{ checksum "yarn.lock" }}
           paths:
-            - ~/.npm
+            - ~/.cache/yarn
 
   benchmark-cold-miss:
     docker:
@@ -47,4 +47,4 @@ jobs:
             - excalidraw-deps-v1-cache-miss-{{ epoch }}
       - run:
           name: Install dependencies (after cache miss)
-          command: npm ci --prefer-offline=false --ignore-scripts
+          command: yarn install --frozen-lockfile --ignore-scripts
