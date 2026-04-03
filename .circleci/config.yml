@@ -31,6 +31,9 @@ jobs:
       - run:
           name: Install dependencies
           command: yarn install --frozen-lockfile --ignore-scripts
+      - run:
+          name: Count cache files
+          command: find ~/.cache/yarn -type f | wc -l
       - save_cache:
           key: excalidraw-deps-v1-{{ checksum "yarn.lock" }}
           paths:
