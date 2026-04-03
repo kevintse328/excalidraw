@@ -6,6 +6,7 @@ workflows:
       - benchmark-no-cache
       - benchmark-warm-cache
       - benchmark-cold-miss
+      - benchmark-perfect-cache
 
 jobs:
   benchmark-no-cache:
@@ -16,7 +17,7 @@ jobs:
       - checkout
       - run:
           name: Install dependencies (no cache)
-          command: yarn install --frozen-lockfile --ignore-scripts
+          command: yarn install --frozen-lockfile --ignore-scripts --prefer-offline=false
 
   benchmark-warm-cache:
     docker:
@@ -47,4 +48,20 @@ jobs:
             - excalidraw-deps-v1-cache-miss-{{ epoch }}
       - run:
           name: Install dependencies (after cache miss)
+          command: yarn install --frozen-lockfile --ignore-scripts --prefer-offline=false
+
+  benchmark-perfect-cache:
+    docker:
+      - image: cimg/node:22.0
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Warm yarn cache (run 1 — not measured)
+          command: yarn install --frozen-lockfile --ignore-scripts
+      - run:
+          name: Clear node_modules but keep yarn cache
+          command: rm -rf node_modules
+      - run:
+          name: Install from perfect local cache (run 2 — this is the measurement)
           command: yarn install --frozen-lockfile --ignore-scripts
