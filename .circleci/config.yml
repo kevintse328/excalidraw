@@ -7,6 +7,7 @@ workflows:
       - benchmark-warm-cache
       - benchmark-cold-miss
       - benchmark-perfect-cache
+      - benchmark-restore-breakdown
 
 jobs:
   benchmark-no-cache:
@@ -68,3 +69,22 @@ jobs:
       - run:
           name: Install from perfect local cache (run 2 — this is the measurement)
           command: yarn install --frozen-lockfile --ignore-scripts
+
+  benchmark-restore-breakdown:
+    docker:
+      - image: cimg/node:22.0
+    resource_class: medium
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - excalidraw-deps-v1-{{ checksum "yarn.lock" }}
+      - run:
+          name: Re-tar the cache (simulates save — no network)
+          command: tar cf /tmp/yarn-cache.tar ~/.cache/yarn
+      - run:
+          name: Remove cache dir
+          command: rm -rf ~/.cache/yarn
+      - run:
+          name: Extract from local tar (simulates restore — no network)
+          command: time tar xf /tmp/yarn-cache.tar -C /
