@@ -35,6 +35,9 @@ jobs:
       - run:
           name: Count cache files
           command: find ~/.cache/yarn -type f | wc -l
+      - run:
+          name: Measure cache size
+          command: du -sh ~/.cache/yarn
       - save_cache:
           key: excalidraw-deps-v1-{{ checksum "yarn.lock" }}
           paths:
