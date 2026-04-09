@@ -1,5 +1,4 @@
 version: 2.1
-
 workflows:
   cache-benchmark:
     jobs:
@@ -8,6 +7,7 @@ workflows:
       - benchmark-cold-miss
       - benchmark-perfect-cache
       - benchmark-restore-breakdown
+      - benchmark-compression-comparison
 
 jobs:
   benchmark-no-cache:
@@ -91,3 +91,83 @@ jobs:
       - run:
           name: Extract from local tar (simulates restore — no network)
           command: time tar xf /tmp/yarn-cache.tar -C /
+
+  benchmark-compression-comparison:
+    docker:
+      - image: cimg/node:22.0
+    resource_class: medium
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - excalidraw-deps-v1-{{ checksum "yarn.lock" }}
+
+      - run:
+          name: Characterise cache
+          command: |
+            echo "=== File count ==="
+            find ~/.cache/yarn -type f | wc -l
+            echo "=== Uncompressed size ==="
+            du -sh ~/.cache/yarn
+
+      - run:
+          name: Create both tarballs from the same source
+          command: |
+            echo "--- Creating uncompressed tar ---"
+            time tar cf /tmp/yarn-cache.tar ~/.cache/yarn
+            echo "--- Creating gzip-compressed tar ---"
+            time tar czf /tmp/yarn-cache.tar.gz ~/.cache/yarn
+            echo "=== Tarball sizes ==="
+            ls -lh /tmp/yarn-cache.tar /tmp/yarn-cache.tar.gz
+            echo "=== Compression ratio ==="
+            python3 -c "
+            import os
+            unc = os.path.getsize('/tmp/yarn-cache.tar')
+            cmp = os.path.getsize('/tmp/yarn-cache.tar.gz')
+            print(f'Uncompressed: {unc/1024/1024:.1f} MB')
+            print(f'Compressed:   {cmp/1024/1024:.1f} MB')
+            print(f'Ratio:        {unc/cmp:.2f}x')
+            "
+
+      # Run uncompressed extraction first
+      - run:
+          name: "[Run 1] Extract uncompressed tar"
+          command: |
+            rm -rf ~/.cache/yarn
+            sync
+            echo "--- Extracting uncompressed tar ---"
+            time tar xf /tmp/yarn-cache.tar -C /
+
+      # Then compressed — same files, different format
+      - run:
+          name: "[Run 2] Extract compressed tar (gzip)"
+          command: |
+            rm -rf ~/.cache/yarn
+            sync
+            echo "--- Extracting compressed (gzip) tar ---"
+            time tar xzf /tmp/yarn-cache.tar.gz -C /
+
+      # Repeat in reverse order to check for systematic bias
+      - run:
+          name: "[Run 3] Extract compressed tar again (reverse order check)"
+          command: |
+            rm -rf ~/.cache/yarn
+            sync
+            echo "--- Extracting compressed (gzip) tar — second run ---"
+            time tar xzf /tmp/yarn-cache.tar.gz -C /
+
+      - run:
+          name: "[Run 4] Extract uncompressed tar again (reverse order check)"
+          command: |
+            rm -rf ~/.cache/yarn
+            sync
+            echo "--- Extracting uncompressed tar — second run ---"
+            time tar xf /tmp/yarn-cache.tar -C /
+
+      - run:
+          name: Summary
+          command: |
+            echo "Compare 'real' times across the four extraction steps above."
+            echo "If uncompressed is not materially faster than compressed,"
+            echo "the bottleneck is file creation (inode writes), not decompression."
+            echo "Key question: is delta(Run1, Run2) consistent with delta(Run4, Run3)?"
