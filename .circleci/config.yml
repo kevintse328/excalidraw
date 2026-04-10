@@ -103,6 +103,13 @@ jobs:
             - excalidraw-deps-v1-{{ checksum "yarn.lock" }}
 
       - run:
+          name: Verify zstd availability
+          command: |
+            which zstd
+            zstd --version
+            tar --version
+
+      - run:
           name: Characterise cache
           command: |
             echo "=== File count ==="
@@ -115,21 +122,20 @@ jobs:
           command: |
             echo "--- Creating uncompressed tar ---"
             time tar cf /tmp/yarn-cache.tar ~/.cache/yarn
-            echo "--- Creating gzip-compressed tar ---"
-            time tar czf /tmp/yarn-cache.tar.gz ~/.cache/yarn
+            echo "--- Creating zstd-compressed tar ---"
+            time tar -I zstd -cf /tmp/yarn-cache.tar.zst ~/.cache/yarn
             echo "=== Tarball sizes ==="
-            ls -lh /tmp/yarn-cache.tar /tmp/yarn-cache.tar.gz
+            ls -lh /tmp/yarn-cache.tar /tmp/yarn-cache.tar.zst
             echo "=== Compression ratio ==="
             python3 -c "
             import os
             unc = os.path.getsize('/tmp/yarn-cache.tar')
-            cmp = os.path.getsize('/tmp/yarn-cache.tar.gz')
+            cmp = os.path.getsize('/tmp/yarn-cache.tar.zst')
             print(f'Uncompressed: {unc/1024/1024:.1f} MB')
             print(f'Compressed:   {cmp/1024/1024:.1f} MB')
             print(f'Ratio:        {unc/cmp:.2f}x')
             "
 
-      # Run uncompressed extraction first
       - run:
           name: "[Run 1] Extract uncompressed tar"
           command: |
@@ -138,23 +144,21 @@ jobs:
             echo "--- Extracting uncompressed tar ---"
             time tar xf /tmp/yarn-cache.tar -C /
 
-      # Then compressed — same files, different format
       - run:
-          name: "[Run 2] Extract compressed tar (gzip)"
+          name: "[Run 2] Extract zstd-compressed tar"
           command: |
             rm -rf ~/.cache/yarn
             sync
-            echo "--- Extracting compressed (gzip) tar ---"
-            time tar xzf /tmp/yarn-cache.tar.gz -C /
+            echo "--- Extracting zstd-compressed tar ---"
+            time tar -I zstd -xf /tmp/yarn-cache.tar.zst -C /
 
-      # Repeat in reverse order to check for systematic bias
       - run:
-          name: "[Run 3] Extract compressed tar again (reverse order check)"
+          name: "[Run 3] Extract zstd-compressed tar again (reverse order check)"
           command: |
             rm -rf ~/.cache/yarn
             sync
-            echo "--- Extracting compressed (gzip) tar — second run ---"
-            time tar xzf /tmp/yarn-cache.tar.gz -C /
+            echo "--- Extracting zstd-compressed tar — second run ---"
+            time tar -I zstd -xf /tmp/yarn-cache.tar.zst -C /
 
       - run:
           name: "[Run 4] Extract uncompressed tar again (reverse order check)"
@@ -168,6 +172,7 @@ jobs:
           name: Summary
           command: |
             echo "Compare 'real' times across the four extraction steps above."
-            echo "If uncompressed is not materially faster than compressed,"
-            echo "the bottleneck is file creation (inode writes), not decompression."
-            echo "Key question: is delta(Run1, Run2) consistent with delta(Run4, Run3)?"
+            echo "zstd decompresses at ~1-3 GB/s vs gzip's ~200 MB/s."
+            echo "If the gap between uncompressed and zstd is small, CPU-bound"
+            echo "decompression is no longer the bottleneck and CircleCI's"
+            echo "existing zstd rollout has already closed it."
