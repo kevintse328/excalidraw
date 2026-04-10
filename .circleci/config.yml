@@ -103,11 +103,8 @@ jobs:
             - excalidraw-deps-v1-{{ checksum "yarn.lock" }}
 
       - run:
-          name: Verify zstd availability
-          command: |
-            which zstd
-            zstd --version
-            tar --version
+          name: Install zstd
+          command: sudo apt-get update -qq && sudo apt-get install -y -qq zstd
 
       - run:
           name: Characterise cache
