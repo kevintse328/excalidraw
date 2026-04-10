@@ -107,69 +107,88 @@ jobs:
           command: sudo apt-get update -qq && sudo apt-get install -y -qq zstd
 
       - run:
-          name: Characterise cache
+          name: Characterise cache and detect format of restored artifact
           command: |
             echo "=== File count ==="
             find ~/.cache/yarn -type f | wc -l
             echo "=== Uncompressed size ==="
             du -sh ~/.cache/yarn
+            echo "=== Detecting format of artifact downloaded by restore_cache ==="
+            # The task-agent writes the downloaded archive to /tmp/cache* before extracting.
+            # By the time this step runs it has already been cleaned up, but we can check
+            # for any residual files and detect the format of what was saved.
+            ls -lh /tmp/cache* 2>/dev/null || echo "No /tmp/cache* files (already cleaned up by task-agent — expected)"
+            echo "=== Checking if zstd binary used by task-agent is present ==="
+            find /usr/local/lib /usr/lib -name "libzstd*" 2>/dev/null | head -5 || echo "No libzstd found in standard paths"
 
       - run:
-          name: Create both tarballs from the same source
+          name: Create all three tarballs from the same source
           command: |
             echo "--- Creating uncompressed tar ---"
             time tar cf /tmp/yarn-cache.tar ~/.cache/yarn
+            echo "--- Creating gzip-compressed tar ---"
+            time tar czf /tmp/yarn-cache.tar.gz ~/.cache/yarn
             echo "--- Creating zstd-compressed tar ---"
             time tar -I zstd -cf /tmp/yarn-cache.tar.zst ~/.cache/yarn
             echo "=== Tarball sizes ==="
-            ls -lh /tmp/yarn-cache.tar /tmp/yarn-cache.tar.zst
-            echo "=== Compression ratio ==="
+            ls -lh /tmp/yarn-cache.tar /tmp/yarn-cache.tar.gz /tmp/yarn-cache.tar.zst
+            echo "=== Compression ratios ==="
             python3 -c "
             import os
             unc = os.path.getsize('/tmp/yarn-cache.tar')
-            cmp = os.path.getsize('/tmp/yarn-cache.tar.zst')
+            gz  = os.path.getsize('/tmp/yarn-cache.tar.gz')
+            zst = os.path.getsize('/tmp/yarn-cache.tar.zst')
             print(f'Uncompressed: {unc/1024/1024:.1f} MB')
-            print(f'Compressed:   {cmp/1024/1024:.1f} MB')
-            print(f'Ratio:        {unc/cmp:.2f}x')
+            print(f'Gzip:         {gz/1024/1024:.1f} MB  ratio {unc/gz:.2f}x')
+            print(f'Zstd:         {zst/1024/1024:.1f} MB  ratio {unc/zst:.2f}x')
             "
 
+      # ── Round 1: uncompressed → gzip → zstd ──────────────────────────────────
       - run:
-          name: "[Run 1] Extract uncompressed tar"
+          name: "[R1-unc] Uncompressed"
           command: |
-            rm -rf ~/.cache/yarn
-            sync
-            echo "--- Extracting uncompressed tar ---"
+            rm -rf ~/.cache/yarn && sync
             time tar xf /tmp/yarn-cache.tar -C /
 
       - run:
-          name: "[Run 2] Extract zstd-compressed tar"
+          name: "[R1-gz] Gzip"
           command: |
-            rm -rf ~/.cache/yarn
-            sync
-            echo "--- Extracting zstd-compressed tar ---"
+            rm -rf ~/.cache/yarn && sync
+            time tar xzf /tmp/yarn-cache.tar.gz -C /
+
+      - run:
+          name: "[R1-zst] Zstd"
+          command: |
+            rm -rf ~/.cache/yarn && sync
+            time tar -I zstd -xf /tmp/yarn-cache.tar.zst -C /
+
+      # ── Round 2 (reverse order): zstd → gzip → uncompressed ─────────────────
+      - run:
+          name: "[R2-zst] Zstd (reverse)"
+          command: |
+            rm -rf ~/.cache/yarn && sync
             time tar -I zstd -xf /tmp/yarn-cache.tar.zst -C /
 
       - run:
-          name: "[Run 3] Extract zstd-compressed tar again (reverse order check)"
+          name: "[R2-gz] Gzip (reverse)"
           command: |
-            rm -rf ~/.cache/yarn
-            sync
-            echo "--- Extracting zstd-compressed tar — second run ---"
-            time tar -I zstd -xf /tmp/yarn-cache.tar.zst -C /
+            rm -rf ~/.cache/yarn && sync
+            time tar xzf /tmp/yarn-cache.tar.gz -C /
 
       - run:
-          name: "[Run 4] Extract uncompressed tar again (reverse order check)"
+          name: "[R2-unc] Uncompressed (reverse)"
           command: |
-            rm -rf ~/.cache/yarn
-            sync
-            echo "--- Extracting uncompressed tar — second run ---"
+            rm -rf ~/.cache/yarn && sync
             time tar xf /tmp/yarn-cache.tar -C /
 
       - run:
-          name: Summary
+          name: Summary — compare to platform restore_cache times
           command: |
-            echo "Compare 'real' times across the four extraction steps above."
-            echo "zstd decompresses at ~1-3 GB/s vs gzip's ~200 MB/s."
-            echo "If the gap between uncompressed and zstd is small, CPU-bound"
-            echo "decompression is no longer the bottleneck and CircleCI's"
-            echo "existing zstd rollout has already closed it."
+            echo "Read the 'real' times from the six steps above."
+            echo ""
+            echo "Expected order (fastest to slowest): uncompressed < zstd < gzip"
+            echo "Platform restore_cache reported: download 5.96s + extraction 17.53s = 23.49s total"
+            echo ""
+            echo "If gzip local time ≈ 17.53s  → platform is still extracting gzip despite 'Extracting using zstd' log"
+            echo "If zstd local time ≈ 17.53s  → platform zstd is correct but slower than our single-node zstd (expected)"
+            echo "If uncompressed ≈ 17.53s     → extraction overhead is pure filesystem IO regardless of compression"
